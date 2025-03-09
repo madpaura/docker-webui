@@ -14,20 +14,38 @@ from config import config
 def clone_repository(repo_url: str, branch: str) -> bool:
     try:
         st.session_state.git_handler = GitHandler(repo_url, branch)
-        success, message = st.session_state.git_handler.clone()
+        
+        # Add progress container
+        progress_container = st.empty()
+        progress_bar = progress_container.progress(0)
+        status_text = st.empty()
+        
+        def update_progress(current: int, total: int, message: str):
+            progress = int((current / total) * 100) if total > 0 else 0
+            progress_bar.progress(progress)
+            status_text.markdown(f"**Status:** {message} ({current}/{total})")
+        
+        success, message = st.session_state.git_handler.clone(progress_callback=update_progress)
         
         if success:
-            st.success(message)
+            # Clear progress indicators
+            progress_container.empty()
+            status_text.empty()
+            
+            # Show success notification
+            st.toast(message, icon="✅")
+            
             # List available Dockerfiles
             st.session_state.available_dockerfiles = st.session_state.git_handler.list_dockerfile_paths()
             if st.session_state.available_dockerfiles:
                 st.session_state.dockerfile_path = st.session_state.available_dockerfiles[0]
             return True
         else:
-            st.error(message)
+            # Show error notification
+            st.toast(f"Error: {message}", icon="❌")
             return False
     except Exception as e:
-        st.error(f"Error cloning repository: {str(e)}")
+        st.toast(f"Error cloning repository: {str(e)}", icon="❌")
         return False
 
 

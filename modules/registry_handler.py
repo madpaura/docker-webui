@@ -200,3 +200,58 @@ class RegistryHandler:
                 return False, f"Failed to delete image: {response.status_code} {response.reason}"
         except requests.RequestException as e:
             return False, f"Error deleting image: {str(e)}"
+            
+    def list_all_images(self) -> Tuple[bool, List[Dict[str, Any]], str]:
+        """
+        List all images (repositories and tags) in the registry.
+        
+        Returns:
+            Tuple of (success, images list, message)
+            Each image in the list is a dict with 'repository' and 'tags' keys
+        """
+        try:
+            # First, get all repositories
+            success, repositories, message = self.list_repositories()
+            if not success:
+                return False, [], message
+                
+            # For each repository, get its tags and build the image list
+            images = []
+            for repo in repositories:
+                tag_success, tags, tag_message = self.list_tags(repo)
+                if tag_success and tags:
+                    # Get additional information for each tag if available
+                    tag_details = []
+                    for tag in tags:
+                        # Try to get manifest to extract creation date and size if available
+                        manifest_success, manifest, _ = self.get_image_manifest(repo, tag)
+                        created = ""
+                        size = 0
+                        if manifest_success and manifest:
+                            # Try to extract creation date and size from manifest
+                            # This might vary depending on registry implementation
+                            if "history" in manifest and manifest["history"]:
+                                try:
+                                    v1_compat = json.loads(manifest["history"][0].get("v1Compatibility", "{}"))
+                                    created = v1_compat.get("created", "")
+                                except (json.JSONDecodeError, IndexError):
+                                    pass
+                                    
+                            # Calculate size from layers if available
+                            if "layers" in manifest:
+                                size = sum(layer.get("size", 0) for layer in manifest["layers"])
+                                
+                        tag_details.append({
+                            "tag": tag,
+                            "created": created,
+                            "size": size
+                        })
+                        
+                    images.append({
+                        "repository": repo,
+                        "tags": tag_details
+                    })
+                    
+            return True, images, f"Found {len(images)} repositories with images"
+        except Exception as e:
+            return False, [], f"Error listing all images: {str(e)}"

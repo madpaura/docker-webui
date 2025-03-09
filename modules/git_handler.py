@@ -42,9 +42,35 @@ class GitHandler:
             repo_url = repo_url[:-4]
         return repo_url.split("/")[-1]
 
-    def clone(self) -> Tuple[bool, str]:
+    def _create_progress_handler(self, progress_callback: Optional[callable]) -> Optional[callable]:
+        """
+        Create a progress handler for Git operations.
+
+        Args:
+            progress_callback: Callback function to report progress
+
+        Returns:
+            Progress handler function or None
+        """
+        if not progress_callback:
+            return None
+            
+        def progress_handler(op_code, cur_count, max_count, message):
+            if max_count > 0:
+                progress = int((cur_count / max_count) * 100)
+            else:
+                progress = 0
+            progress_callback(cur_count, max_count, message)
+            
+        return progress_handler
+
+    def clone(self, progress_callback: Optional[callable] = None) -> Tuple[bool, str]:
         """
         Clone the repository.
+
+        Args:
+            progress_callback: Callback function to report progress
+                Signature: (current: int, total: int, message: str) -> None
 
         Returns:
             Tuple of (success, message)
@@ -54,16 +80,37 @@ class GitHandler:
                 # Repository already exists, pull latest changes
                 self.repo = Repo(self.repo_path)
                 origin = self.repo.remotes.origin
+                
+                if progress_callback:
+                    progress_callback(1, 1, "Pulling latest changes")
+                
                 origin.pull()
                 return True, f"Repository already exists. Pulled latest changes from {self.branch}."
             else:
                 # Clone the repository
+                if progress_callback:
+                    progress_callback(0, 100, "Starting clone")
+                
                 if config.git.token:
                     # Use token for authentication if provided
                     auth_url = self.repo_url.replace("https://", f"https://{config.git.token}@")
-                    self.repo = Repo.clone_from(auth_url, self.repo_path, branch=self.branch)
+                    self.repo = Repo.clone_from(
+                        auth_url, 
+                        self.repo_path, 
+                        branch=self.branch,
+                        progress=self._create_progress_handler(progress_callback)
+                    )
                 else:
-                    self.repo = Repo.clone_from(self.repo_url, self.repo_path, branch=self.branch)
+                    self.repo = Repo.clone_from(
+                        self.repo_url, 
+                        self.repo_path, 
+                        branch=self.branch,
+                        progress=self._create_progress_handler(progress_callback)
+                    )
+                
+                if progress_callback:
+                    progress_callback(100, 100, "Clone complete")
+                
                 return True, f"Successfully cloned repository to {self.repo_path}"
         except GitCommandError as e:
             return False, f"Git error: {str(e)}"
@@ -268,3 +315,32 @@ class GitHandler:
             return True, branch_info
         except Exception as e:
             return False, {"error": f"Error getting branch info: {str(e)}"}
+
+    def format_repo_info(self) -> str:
+        """
+        Format repository information in a table-like structure.
+        
+        Returns:
+            Formatted string with repository information
+        """
+        # Get branch and commit info
+        branch_success, branch_info = self.get_branch_info()
+        commit_success, commit_info = self.get_latest_commit_info()
+        
+        # Create the table structure
+        table = [
+            "╔════════════════════════════════════════════════════════════════╗",
+            "║ Repository Information                                         ║",
+            "╠════════════════════════════════════════════════════════════════╣",
+            f"║ Repository: {self.repo_name:<50} ║",
+            f"║ Branch:     {branch_info['name'] if branch_success else 'N/A':<50} ║",
+            f"║ Tracking:   {branch_info['tracking_branch'] if branch_success and branch_info['tracking_branch'] else 'N/A':<50} ║",
+            "╠════════════════════════════════════════════════════════════════╣",
+            f"║ Latest Commit: {commit_info['id'] if commit_success else 'N/A':<46} ║",
+            f"║ Message:    {commit_info['message'] if commit_success else 'N/A':<50} ║",
+            f"║ Author:     {commit_info['author'] if commit_success else 'N/A':<50} ║",
+            f"║ Date:       {commit_info['date'] if commit_success else 'N/A':<50} ║",
+            "╚════════════════════════════════════════════════════════════════╝"
+        ]
+        
+        return "\n".join(table)

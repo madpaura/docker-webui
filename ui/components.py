@@ -115,12 +115,19 @@ def render_repository_info(git_handler: Optional[GitHandler] = None):
         branch_success, branch_info = git_handler.get_branch_info()
         
         if success:
-            st.markdown(f"**Repository:** {git_handler.repo_name}")
-            st.markdown(f"**Branch:** {branch_info['name'] if branch_success else git_handler.branch}")
-            st.markdown(f"**Latest Commit:** {commit_info['id']}")
-            st.markdown(f"**Commit Message:** {commit_info['message'][:50]}{'...' if len(commit_info['message']) > 50 else ''}")
-            st.markdown(f"**Author:** {commit_info['author'].split('<')[0]}")
-            st.markdown(f"**Date:** {commit_info['date']}")
+            import pandas as pd
+            # Create table data as dictionary
+            table_data = {
+                "Repo": git_handler.repo_name,
+                "Branch": branch_info['name'] if branch_success else git_handler.branch,
+                "Commit": commit_info['id'],
+                "Log": commit_info['message'][:50] + ('...' if len(commit_info['message']) > 50 else ''),
+                "Author": commit_info['author'].split('<')[0],
+                "Date": commit_info['date']
+            }
+            # Convert to DataFrame and display without index
+            df = pd.DataFrame(list(table_data.items()), columns=["Field", "Value"])
+            st.dataframe(df, hide_index=True)
     else:
         st.info("No repository cloned yet")
 
@@ -349,3 +356,94 @@ def render_publish_tab(push_to_registry_callback, commit_dockerfile_changes_call
                     commit_dockerfile_changes_callback(commit_message)
     else:
         st.info("Build an image successfully before publishing")
+
+
+def render_registry_images_tab():
+    """Render the Registry Images tab that lists available images remotely in the registry server."""
+    st.header("Registry Images")
+    
+    # Registry URL information
+    registry_url = st.session_state.registry_url
+    st.subheader(f"Registry: {registry_url}")
+    
+    # Refresh button
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        refresh = st.button("🔄 Refresh")
+    
+    # Check connection to registry
+    if not hasattr(st.session_state, "registry_images") or refresh:
+        with st.spinner("Connecting to registry..."):
+            # Check connection first
+            connection_success, connection_message = st.session_state.registry_handler.check_connection()
+            
+            if connection_success:
+                # List all images
+                success, images, message = st.session_state.registry_handler.list_all_images()
+                if success:
+                    st.session_state.registry_images = images
+                    st.session_state.registry_message = message
+                else:
+                    st.session_state.registry_images = []
+                    st.session_state.registry_message = message
+            else:
+                st.error(f"Failed to connect to registry: {connection_message}")
+                st.session_state.registry_images = []
+                st.session_state.registry_message = connection_message
+    
+    # Display registry images
+    if hasattr(st.session_state, "registry_images"):
+        if st.session_state.registry_images:
+            # Display images in an expandable format
+            for repo_index, repo_data in enumerate(st.session_state.registry_images):
+                repository = repo_data["repository"]
+                tags = repo_data["tags"]
+                
+                with st.expander(f"📦 {repository} ({len(tags)} tags)"):
+                    # Create a table for tags
+                    if tags:
+                        # Convert tag data to a format suitable for a dataframe
+                        tag_data = []
+                        for tag_info in tags:
+                            tag_name = tag_info["tag"]
+                            created = tag_info["created"]
+                            size = tag_info["size"]
+                            
+                            # Format size to human-readable format
+                            if size > 0:
+                                size_str = f"{size / (1024 * 1024):.2f} MB"
+                            else:
+                                size_str = "Unknown"
+                                
+                            # Format created date if available
+                            created_str = created[:19].replace("T", " ") if created else "Unknown"
+                            
+                            tag_data.append({
+                                "Tag": tag_name,
+                                "Created": created_str,
+                                "Size": size_str,
+                                "Full Name": f"{repository}:{tag_name}"
+                            })
+                        
+                        # Display as a dataframe
+                        import pandas as pd
+                        df = pd.DataFrame(tag_data)
+                        st.dataframe(df, use_container_width=True)
+                        
+                        # Add a button to pull the selected image
+                        selected_tag = st.selectbox(
+                            "Select a tag to pull",
+                            options=[tag_info["tag"] for tag_info in tags],
+                            key=f"select_tag_{repo_index}"
+                        )
+                        
+                        if st.button(f"Pull {repository}:{selected_tag}", key=f"pull_button_{repo_index}"):
+                            st.info(f"Pulling {repository}:{selected_tag} from {registry_url}...")
+                            # This would need to be implemented in the Docker handler
+                            st.warning("Pull functionality not yet implemented")
+                    else:
+                        st.info("No tags found for this repository")
+        else:
+            st.info("No images found in the registry")
+            if hasattr(st.session_state, "registry_message"):
+                st.info(st.session_state.registry_message)

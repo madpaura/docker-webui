@@ -8,7 +8,7 @@ import streamlit as st
 from ui.app_state import init_session_state, init_handlers, reload_repository
 from ui.components import (
     render_sidebar, render_edit_tab, render_build_tab, 
-    render_logs_tab, render_publish_tab
+    render_logs_tab, render_publish_tab, render_registry_images_tab
 )
 from core.operations import (
     clone_repository, load_dockerfile, save_dockerfile,
@@ -52,7 +52,7 @@ def main():
     repository, tag = render_sidebar(clone_repository, load_dockerfile, init_handlers)
     
     # Main content area with tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Edit Dockerfile", "Build", "Logs", "Publish"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Edit Dockerfile", "Build", "Logs", "Publish", "Registry Images"])
     
     # Tab 1: Edit Dockerfile
     with tab1:
@@ -71,6 +71,10 @@ def main():
     # Tab 4: Publish
     with tab4:
         render_publish_tab(push_to_registry, commit_dockerfile_changes)
+        
+    # Tab 5: Registry Images
+    with tab5:
+        render_registry_images_tab()
 
 
 if __name__ == "__main__":
